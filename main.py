@@ -1,213 +1,200 @@
-
-import streamlit as st
-import streamlit_autorefresh
 import time
-import pandas as pd
 from datetime import datetime
 
-# 페이지 설정
+import streamlit as st
+
+
 st.set_page_config(
-    page_title="학생용 학습 타이머",
-    page_icon="📚",
-    layout="centered"
+    page_title="학생 학습 타이머",
+    page_icon="⏱️",
+    layout="centered",
 )
+
+st.title("⏱️ 학생 학습 타이머")
+st.caption("과목을 선택하고 공부 시간을 측정해 보세요.")
 
 # 세션 상태 초기화
-if "running" not in st.session_state:
-    st.session_state.running = False
+defaults = {
+    "subjects": ["국어", "영어", "수학", "과학", "사회"],
+    "selected_subject": "국어",
+    "elapsed": 0.0,
+    "started_at": None,
+    "is_running": False,
+    "records": {},
+    "history": [],
+}
+for key, value in defaults.items():
+    if key not in st.session_state:
+        st.session_state[key] = value
 
-if "elapsed" not in st.session_state:
-    st.session_state.elapsed = 0.0
 
-if "start_time" not in st.session_state:
-    st.session_state.start_time = None
+def elapsed_now():
+    """현재 세션의 누적 경과 시간을 초 단위로 반환합니다."""
+    elapsed = st.session_state.elapsed
+    if st.session_state.is_running and st.session_state.started_at is not None:
+        elapsed += time.time() - st.session_state.started_at
+    return max(0.0, elapsed)
 
-if "records" not in st.session_state:
-    st.session_state.records = []
 
-if "subject" not in st.session_state:
-    st.session_state.subject = "수학"
+def format_time(seconds):
+    total = int(seconds)
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
-# 제목
-st.title("📚 나의 학습 타이머")
-st.caption("오늘도 목표를 향해 한 걸음씩!")
+
+def pause_timer():
+    if st.session_state.is_running:
+        st.session_state.elapsed = elapsed_now()
+        st.session_state.started_at = None
+        st.session_state.is_running = False
+
+
+# 과목 선택 및 추가
+st.subheader("📚 과목")
+subject_col, add_col = st.columns([2, 1])
+
+with subject_col:
+    selected = st.selectbox(
+        "공부할 과목",
+        st.session_state.subjects,
+        index=st.session_state.subjects.index(st.session_state.selected_subject),
+        disabled=st.session_state.is_running,
+        label_visibility="collapsed",
+    )
+    st.session_state.selected_subject = selected
+
+with add_col:
+    with st.popover("＋ 과목 추가", use_container_width=True):
+        new_subject = st.text_input("과목 이름", key="new_subject_input")
+        if st.button("추가하기", use_container_width=True):
+            cleaned = new_subject.strip()
+            if not cleaned:
+                st.warning("과목 이름을 입력해 주세요.")
+            elif cleaned in st.session_state.subjects:
+                st.info("이미 등록된 과목입니다.")
+            else:
+                st.session_state.subjects.append(cleaned)
+                st.session_state.selected_subject = cleaned
+                st.rerun()
 
 st.divider()
+st.subheader("⏱️ 학습 타이머")
 
-# 과목 선택
-st.subheader("📖 학습 과목")
-
-subject = st.selectbox(
-    "공부할 과목을 선택하세요.",
-    ["국어", "영어", "수학", "과학", "사회", "기타"],
-    key="subject"
-)
-
-# 타이머 계산
-if st.session_state.running:
-    elapsed = (
-        st.session_state.elapsed
-        + time.time() - st.session_state.start_time
-    )
-else:
-    elapsed = st.session_state.elapsed
-
-hours = int(elapsed // 3600)
-minutes = int((elapsed % 3600) // 60)
-seconds = int(elapsed % 60)
-
-# 타이머 표시
-st.subheader("⏱️ 공부 시간")
-
-st.markdown(
-    f"""
-    <div style="
-        background-color: #172554;
-        padding: 30px;
-        border-radius: 15px;
-        text-align: center;
-        margin-bottom: 20px;
-    ">
+@st.fragment(run_every="1s")
+def timer_panel():
+    current = elapsed_now()
+    st.markdown(
+        f"""
         <div style="
-            color: #93C5FD;
-            font-size: 18px;
-        ">
-            {subject} 학습 시간
-        </div>
-        <div style="
+            background: linear-gradient(135deg, #172554, #1e40af);
+            border-radius: 18px;
+            padding: 30px 16px;
+            text-align: center;
             color: white;
-            font-size: 55px;
-            font-weight: bold;
-            font-family: monospace;
+            margin: 8px 0 18px 0;
         ">
-            {hours:02d}:{minutes:02d}:{seconds:02d}
+            <div style="font-size: 14px; opacity: .85;">{st.session_state.selected_subject}</div>
+            <div style="font-size: clamp(42px, 9vw, 64px); font-weight: 700;
+                        font-variant-numeric: tabular-nums; letter-spacing: 2px;">
+                {format_time(current)}
+            </div>
+            <div style="font-size: 13px; opacity: .8;">
+                {"공부 중" if st.session_state.is_running else "일시정지"}
+            </div>
         </div>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+        """,
+        unsafe_allow_html=True,
+    )
 
-# 타이머 버튼
-col1, col2, col3 = st.columns(3)
+    start_col, pause_col, reset_col = st.columns(3)
+    with start_col:
+        if st.button(
+            "▶ 시작",
+            use_container_width=True,
+            type="primary",
+            disabled=st.session_state.is_running,
+        ):
+            st.session_state.started_at = time.time()
+            st.session_state.is_running = True
+            st.rerun()
+    with pause_col:
+        if st.button(
+            "⏸ 일시정지",
+            use_container_width=True,
+            disabled=not st.session_state.is_running,
+        ):
+            pause_timer()
+            st.rerun()
+    with reset_col:
+        if st.button("↺ 초기화", use_container_width=True):
+            st.session_state.elapsed = 0.0
+            st.session_state.started_at = time.time() if st.session_state.is_running else None
+            st.rerun()
 
-with col1:
-    if st.button(
-        "▶ 시작",
-        use_container_width=True,
-        disabled=st.session_state.running
-    ):
-        st.session_state.start_time = time.time()
-        st.session_state.running = True
-        st.rerun()
+    st.caption("과목 변경은 타이머를 일시정지한 뒤 할 수 있습니다.")
 
-with col2:
-    if st.button(
-        "⏸ 일시정지",
-        use_container_width=True,
-        disabled=not st.session_state.running
-    ):
-        st.session_state.elapsed += (
-            time.time() - st.session_state.start_time
-        )
-        st.session_state.running = False
-        st.session_state.start_time = None
-        st.rerun()
+timer_panel()
 
-with col3:
-    if st.button("🔄 초기화", use_container_width=True):
-        st.session_state.running = False
-        st.session_state.elapsed = 0.0
-        st.session_state.start_time = None
-        st.rerun()
-
-# 공부 시간 기록
+# 기록 저장
 st.divider()
 st.subheader("📝 학습 기록 저장")
+st.write(f"현재 선택 과목: **{st.session_state.selected_subject}**")
+st.write(f"저장할 시간: **{format_time(elapsed_now())}**")
 
-if st.button("💾 현재 공부 시간 기록하기", use_container_width=True):
-    current_elapsed = st.session_state.elapsed
+save_col, clear_col = st.columns([2, 1])
+with save_col:
+    if st.button("기록 저장", use_container_width=True, type="primary"):
+        pause_timer()
+        seconds = st.session_state.elapsed
+        if seconds <= 0:
+            st.warning("저장할 학습 시간이 없습니다. 타이머를 먼저 시작해 주세요.")
+        else:
+            subject = st.session_state.selected_subject
+            st.session_state.records[subject] = (
+                st.session_state.records.get(subject, 0.0) + seconds
+            )
+            st.session_state.history.append(
+                {
+                    "과목": subject,
+                    "학습 시간": format_time(seconds),
+                    "저장 일시": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                }
+            )
+            st.session_state.elapsed = 0.0
+            st.session_state.started_at = None
+            st.session_state.is_running = False
+            st.success(f"{subject} 학습 기록을 저장했습니다.")
+            st.rerun()
 
-    if st.session_state.running:
-        current_elapsed += (
-            time.time() - st.session_state.start_time
-        )
-
-    if current_elapsed > 0:
-        st.session_state.records.append({
-            "날짜": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "과목": subject,
-            "학습 시간": f"{int(current_elapsed // 3600):02d}:"
-                       f"{int((current_elapsed % 3600) // 60):02d}:"
-                       f"{int(current_elapsed % 60):02d}",
-            "초": int(current_elapsed)
-        })
-        st.session_state.elapsed = 0.0
-
-        if st.session_state.running:
-            st.session_state.start_time = time.time()
-
-        st.success(f"{subject} 학습 기록이 저장되었습니다!")
+with clear_col:
+    if st.button("기록 전체 삭제", use_container_width=True):
+        st.session_state.records = {}
+        st.session_state.history = []
+        st.success("과목별 누적 기록을 삭제했습니다.")
         st.rerun()
-    else:
-        st.warning("먼저 학습 타이머를 시작하세요.")
 
-# 실시간 자동 새로고침
-if st.session_state.running:
-    streamlit_autorefresh.st_autorefresh(
-        interval=1000,
-        key="timer_refresh"
-    )
-
-# 학습 기록 목록
+# 과목별 누적 시간
 st.divider()
-st.subheader("📊 과목별 학습 기록")
+st.subheader("📊 과목별 누적 학습 시간")
 
 if st.session_state.records:
-
-    df = pd.DataFrame(st.session_state.records)
-
-    # 과목별 누적 시간
-    summary = df.groupby("과목")["초"].sum()
-
-    st.markdown("### 과목별 누적 학습 시간")
-
-    for name, total in summary.items():
-        h = int(total // 3600)
-        m = int((total % 3600) // 60)
-        s = int(total % 60)
-
-        st.write(f"📘 **{name}** : {h}시간 {m}분 {s}초")
-
-    st.divider()
-
-    st.markdown("### 전체 학습 기록")
-
-    display_df = df.drop(columns=["초"])
-
-    st.dataframe(
-        display_df,
-        use_container_width=True,
-        hide_index=True
-    )
-
-    # 기록 다운로드
-    csv = df.to_csv(index=False).encode("utf-8-sig")
-
-    st.download_button(
-        label="📥 학습 기록 CSV 다운로드",
-        data=csv,
-        file_name="study_records.csv",
-        mime="text/csv",
-        use_container_width=True
-    )
-
-    if st.button("🗑️ 전체 기록 삭제"):
-        st.session_state.records = []
-        st.rerun()
-
+    total_seconds = sum(st.session_state.records.values())
+    st.metric("전체 학습 시간", format_time(total_seconds))
+    for subject, seconds in sorted(
+        st.session_state.records.items(), key=lambda item: item[1], reverse=True
+    ):
+        st.write(f"**{subject}** — {format_time(seconds)}")
+        st.progress(min(seconds / total_seconds, 1.0) if total_seconds else 0.0)
 else:
     st.info("아직 저장된 학습 기록이 없습니다.")
 
-# 하단 안내
-st.divider()
-st.caption("📚 매일 조금씩 공부하는 습관을 만들어 보세요!")
+if st.session_state.history:
+    with st.expander("저장한 기록 자세히 보기"):
+        st.dataframe(
+            list(reversed(st.session_state.history)),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+st.caption("※ 기록은 현재 브라우저 세션에 저장됩니다. 페이지를 새로 시작하거나 세션이 종료되면 사라질 수 있습니다.")
